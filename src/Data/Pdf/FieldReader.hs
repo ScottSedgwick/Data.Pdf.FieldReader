@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {- |
 Copyright: (c) 2021 Scott Sedgwick
 SPDX-License-Identifier: MIT
@@ -19,6 +18,7 @@ module Data.Pdf.FieldReader
 import Prelude hiding (drop, init, lines)
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 (unpack)
+import Data.List (foldl')
 import Data.Map (Map, fromList)
 import Data.Text (Text, drop, init, isPrefixOf, lines, pack, replace, strip)
 
@@ -38,7 +38,7 @@ import Data.Text (Text, drop, init, isPrefixOf, lines, pack, replace, strip)
 
 -- | Read fields from file data
 readPdfFields :: ByteString -> Map Text Text
-readPdfFields = fromList . snd . foldl f (Nothing, []) . lines . pack . unpack
+readPdfFields = fromList . snd . foldl' f (Nothing, []) . lines . pack . unpack
   where
     f (Nothing,  b) x | isFldName x  = (Just (fmtFldName x), b) 
                       | otherwise    = (Nothing, b)
