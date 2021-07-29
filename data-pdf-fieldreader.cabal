@@ -2,6 +2,8 @@ cabal-version:       2.4
 name:                data-pdf-fieldreader
 version:             0.1.0.0
 description:         Simple function to extract PDF form field values from a PDF file.
+synopsis:            Read PDF form fields
+category:            Data
 homepage:            https://github.com/ScottSedgwick/Data.Pdf.FieldReader
 license:             MIT
 license-file:        LICENSE
