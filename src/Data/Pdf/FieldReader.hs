@@ -15,12 +15,16 @@ module Data.Pdf.FieldReader
     readPdfFields
   ) where
 
-import Prelude hiding (drop, init, lines)
 import Data.ByteString (ByteString)
-import Data.ByteString.Char8 (unpack)
+import Data.Char (chr, digitToInt)
+import Data.Functor ((<&>))
 import Data.List (foldl')
-import Data.Map (Map, fromList)
-import Data.Text (Text, drop, init, isPrefixOf, lines, pack, replace, strip)
+import qualified Data.Map as M
+import qualified Data.Text as T
+import Data.Text (Text)
+import Data.Text.Encoding (decodeLatin1)
+import Data.Void (Void)
+import Text.Megaparsec (Parsec, (<|>), anySingle, chunk, many, parseMaybe, takeWhileP)
 
 -- $fileDataParser
 -- 
@@ -36,20 +40,52 @@ import Data.Text (Text, drop, init, isPrefixOf, lines, pack, replace, strip)
 -- >  let ys = readPdfFields xs
 -- >  print ys
 
--- | Read fields from file data
-readPdfFields :: ByteString -> Map Text Text
-readPdfFields = fromList . snd . foldl' f (Nothing, []) . lines . pack . unpack
+-- | Read fields from PDF file data
+
+readPdfFields :: ByteString -> M.Map Text Text
+readPdfFields = maybe M.empty collate . parseMaybe pdfFieldParser . decodeLatin1
+
+type Parser = Parsec Void Text
+data FieldPart 
+  = FieldName Text
+  | FieldValue Text
+  | FieldNothing
+  deriving stock (Show, Eq)
+
+collate :: [FieldPart] -> M.Map Text Text
+collate = snd . foldl' f (Nothing, M.empty)
   where
-    f (Nothing,  b) x | isFldName x  = (Just (fmtFldName x), b) 
-                      | otherwise    = (Nothing, b)
-    f ((Just n), b) x | isFldName x  = (Just (fmtFldName x), b)
-                      | isFldValue x = (Nothing, (n, (fmtFldValue x)) : b)
-                      | otherwise    = ((Just n), b)
-    isFldName     = isPrefixOf "/T("
-    fmtFldName    = stripBrackets
-    isFldValue    = isPrefixOf "/V("
-    fmtFldValue   = unescape . stripBrackets
-    stripBrackets = init . drop 3 . strip
-    unescape xs   = foldr (\(a, b) c -> replace a b c) xs escPairs
-    escPairs      = [("\\n", "\n"), ("\\(", "("), ("\\)", ")")]
-       
+    f (Nothing, m) (FieldName n) = (Just n, m)
+    f (Nothing, m) _             = (Nothing, m)
+    f (Just n, m) (FieldValue v) = (Nothing, M.insert n v m) 
+    f (Just n, m) _              = (Just n, m) 
+
+pdfFieldParser :: Parser [FieldPart]
+pdfFieldParser = many (pFieldName <|> pFieldValue <|> pFieldHexValue <|> anythingElse)
+
+anythingElse :: Parser FieldPart
+anythingElse = anySingle >> pure FieldNothing
+
+pFieldName :: Parser FieldPart
+pFieldName = getBetween "T(" ")" <&> FieldName
+
+pFieldValue :: Parser FieldPart
+pFieldValue = getBetween "V(" ")" <&> FieldValue
+
+pFieldHexValue :: Parser FieldPart
+pFieldHexValue = getBetween "V<" ">" <&> FieldValue . decodeHexField
+
+getBetween :: Text -> Text -> Parser Text
+getBetween x y = chunk x >> takeWhileP Nothing (/= T.head y) >>= \z -> chunk y >> pure z
+
+decodeHexField :: Text -> Text
+decodeHexField xs = if head ys /= "FEFF" then "" else T.pack (map (chr . decodeHex) (tail ys))
+  where
+    ys = splitBy 4 $ T.concat $ T.lines xs
+
+splitBy :: Int -> Text -> [Text]
+splitBy _ "" = []
+splitBy x s  = T.take x s : splitBy x (T.drop x s)
+
+decodeHex :: Text -> Int
+decodeHex = foldl' (\b a -> b * 16 + digitToInt a) 0 . T.unpack
